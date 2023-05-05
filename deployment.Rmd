@@ -1,0 +1,167 @@
+---
+title: "Deployment"
+author: "Irene Sales, Carme Morant, Loriane Gómez"
+date: "2023-04-30"
+output: html_document
+---
+
+# Exercise 5.- Model-agnostic: Partial Dependency Plot (PDP).
+
+## 1.- One dimensional Partial Dependence Plot.
+The partial dependence plot shows the marginal effect of a feature on the predicted outcome of a previously fit model.
+### EXERCISE:
+Apply PDP to the regression example of predicting bike rentals. Fit a random forest approximation for the prediction of bike rentals (*cnt*). Use the partial dependence plot to visualize the relationships the model learned. Use the slides shown in class as model.2
+
+
+```{r}
+library(dplyr)
+library(plotly)
+library(reshape2)
+library(lubridate)
+library(randomForestSRC)
+
+days <- read.csv("day.csv")
+hour <- read.csv("hour.csv")
+days$dteday <- as_date(days$dteday)
+days_select <- select(days, workingday, holiday, temp, hum, windspeed, cnt)
+days_select$days_2011 <- int_length(interval(ymd("2011-01-01"), days$dteday)) / (3600*24)
+days_select$Winter <- ifelse(days$season == 1, 1, 0)
+days_select$Fall <- ifelse(days$season == 4, 1, 0)
+days_select$Summer <- ifelse(days$season == 3, 1, 0)
+days_select$Misty <- ifelse(days$weathersit == 2, 1, 0)
+days_select$Rain <- ifelse(days$weathersit == 3 | days$weathersit == 4, 1, 0)
+days_select$Temp <- days_select$temp * 47 - 8
+days_select$Hum <- days_select$hum * 100
+days_select$Windspeed <- days_select$windspeed * 67
+rfsrc <- rfsrc(cnt~., data=days_select) # Creamos la función random forest
+res <- select(days_select, days_2011, Temp, Hum, Windspeed, cnt)
+
+
+rows <- nrow(days_select)
+for(c in names(res)[1:4])
+{
+  for(i in 1:rows){
+    resul <- days_select
+    resul[[c]] <- days_select[[c]][i]
+    pred <- predict(rfsrc, resul)$predicted
+    res[[c]][i] <- sum(pred) / rows
+  }
+}
+figure1 = ggplot(days_select, aes(x = Temp, y = res$Temp)) + ylim(0, 6000) + geom_line() + geom_rug(sides="b", alpha = 0.5) + labs(x = "Temperature")
+figure2 = ggplot(days_select, aes(x = Hum, y = res$Hum)) + ylim(0, 6000) + geom_line() + geom_rug(sides="b", alpha = 0.5) + labs(x = "Humidity")
+figure3 = ggplot(days_select, aes(x = Windspeed, y = res$Windspeed)) + ylim(0, 6000) + geom_line() + geom_rug(sides="b", alpha = 0.5) + labs(x = "Windspeed")
+figure4 = ggplot(days_select, aes(x = days_2011, y = res$days_2011)) + ylim(0, 6000) + geom_line() + geom_rug(sides="b", alpha = 0.5) + labs(x = "Days since 2011", y = "Predictions")
+
+subplot(figure1, figure2, figure3,figure4, titleX = TRUE, titleY = TRUE, shareX = FALSE, shareY = TRUE)
+```
+
+### QUESTION:
+Analyse the influence of *days since 2011, temperature, humidity and wind speed* on the predicted bike counts.
+
+This analysis focuses on how different variables affect bicycle rental forecasts. For temperature, it is observed that the number of bikes rented increases with temperature up to about 20 degrees Celsius, but then decreases as the temperature rises above 25 degrees Celsius. As for humidity, it remains constant up to 50%, but then decreases in proportion to the increase in humidity. Wind speed also influences bicycle rental forecasts, gradually decreasing until a wind speed of approximately 23 km/h is reached, from which the forecasts are constant. Finally, in terms of days since 2011, there is a general upward trend in bicycle rentals as time passes, although recent forecasts indicate a decrease.
+
+
+## 2.- Bidimensional Partial Dependency Plot.
+### EXERCISE:
+Generate a 2D Partial Dependency Plot with humidity and temperature to predict the number of bikes rented depending on those parameters.
+
+*BE CAREFUL*: due to the size, extract a set of random samples from the BBDD before generating the data for the Partial Dependency Plot.
+Show the density distribution of both input features with the 2D plot as shown in the class slides.
+
+*TIP*: Use geom_tile() to generate the 2D plot. Set width and height to avoid holes.
+
+```{r}
+selection <- sample_n(days_select, 40)
+Temp <- selection$Temp
+Hum <- selection$Hum
+Temp_Hum <- inner_join(data.frame(Temp),data.frame(Hum), by=character())
+Temp_Hum$p <- 0
+for(i in 1:nrow(Temp_Hum)){
+  resul <- days_select
+  resul[["Temp"]] <- Temp_Hum[["Temp"]][i]
+  resul[["Hum"]] <- Temp_Hum[["Hum"]][i]
+  
+  pred <- predict(rfsrc, resul)$predicted
+  Temp_Hum[["p"]][i] <- sum(pred) / rows
+}
+```
+
+```{r}
+figure5 = ggplot(Temp_Hum, aes(x = Temp, y = Hum, fill = p)) + geom_tile(width = 10, height = 15) + geom_rug(alpha = 0.5) + labs(x = "Temperature", y = "Humidity", fill = "Num bikes")
+figure5
+```
+
+### QUESTION:
+Interpret the results.
+
+The graph shows that the highest number of bicycles is rented when the temperature ranges between 15 and 20 degrees and the relative humidity between 0 and 70%. On the other hand, it can be observed that the number of bicycles rented decreases as the humidity is higher and the temperature is lower. 
+
+
+## 3.- PDP to explain the price of a house.
+### EXERCISE:
+Apply the previous concepts to predict the *price* of a house from the database *kc_house_data.csv*. In this case, use again a random forest approximation for the prediction based on the features *bedrooms, bathrooms, sqft_living, sqft_lot, floors and yr_built.*
+Use the partial dependence plot to visualize the relationships the model learned.
+*BE CAREFUL*: due to the size, extract a set of random samples from the BBDD before generating the data for the Partial Dependency Plot.
+
+```{r}
+d <- read.csv("kc_house_data.csv")
+sampled <- sample_n(d, 1000)
+sampled <- select(sampled, bedrooms, bathrooms, sqft_living, sqft_lot, floors, yr_built, price)
+rf <- rfsrc(price~., data=sampled)
+results <- select(sampled, bedrooms, bathrooms, sqft_living, floors, price)
+nr <- nrow(sampled)
+for(c in names(results)[1:4])
+{
+  for(i in 1:nr){
+    r <- sampled
+    r[[c]] <- sampled[[c]][i]
+    sal <- predict(rf, r)$predicted
+    results[[c]][i] <- sum(sal) / nr
+  }
+}
+```
+
+```{r}
+p6 = ggplot(sampled, aes(x = bedrooms,y = results$bedrooms)) + geom_line() + geom_rug(sides = "b", alpha = 0.5) + labs(x = "Bedrooms",y = "Prediction")
+p7 = ggplot(sampled,aes(x=bathrooms,y=results$bathrooms)) + geom_line() +  geom_rug(sides = "b", alpha = 0.5) + labs(x = "Bathrooms", y = "")
+p8 = ggplot(sampled,aes(x=sqft_living,y=results$sqft_living)) + geom_line() +  geom_rug(sides = "b", alpha = 0.5) + labs(x = "Sqft Living", y = "")
+p9 = ggplot(sampled,aes(x=floors,y=results$floors)) +   geom_line() + geom_rug(sides = "b", alpha = 0.5) + labs(x = "Floors", y = "")
+subplot(p6, p7, p8, p9, titleX = TRUE, titleY = TRUE, shareX = FALSE, shareY = FALSE)
+```
+```{r}
+house_data <- read.csv("kc_house_data.csv")
+selection <- sample_n(house_data, 1000)
+selection <- select(selection, bedrooms, bathrooms, sqft_living, sqft_lot, floors, yr_built, price)
+rfsrc1 <- rfsrc(price~., data=selection)
+res <- select(selection, bedrooms, bathrooms, sqft_living, floors, price)
+rows <- nrow(selection)
+for(name in names(res)[1:4])
+{
+  for(i in 1:rows){
+    resul <- selection
+    resul[[name]] <- selection[[name]][i]
+    predic <- predict(rfsrc1, resul)$predicted
+    res[[name]][i] <- sum(predic) / rows
+  }
+}
+
+```
+
+```{r}
+figure6 = ggplot(selection, aes(x = bedrooms,y = res$bedrooms)) + geom_line() + geom_rug(sides = "b", alpha = 0.5) + labs(x = "Bedrooms",y = "Prediction")
+figure7 = ggplot(selection,aes(x=bathrooms,y=res$bathrooms)) + geom_line() +  geom_rug(sides = "b", alpha = 0.5) + labs(x = "Bathrooms", y = "")
+figure8 = ggplot(selection,aes(x=sqft_living,y=res$sqft_living)) + geom_line() +  geom_rug(sides = "b", alpha = 0.5) + labs(x = "Sqft Living", y = "")
+figure9 = ggplot(selection,aes(x=floors,y=res$floors)) +   geom_line() + geom_rug(sides = "b", alpha = 0.5) + labs(x = "Floors", y = "")
+subplot(figure6, figure7, figure8, figure9, titleX = TRUE, titleY = TRUE, shareX = FALSE, shareY = FALSE)
+```
+
+### QUESTION:
+Analyse the influence of *bedrooms, bathrooms, sqft_living and floors* on the predicted price.
+
+As for the bedrooms, the price of the house has a negative correlation with the number of bedrooms in the house, i.e., as the number of bedrooms in the house increases, the price of the house decreases.
+
+In the other hand, the bathrooms, the price of the house has a positive correlation with the number of bathrooms in the house, i.e., as the number of bathrooms in the house increases, the price of the house also increases.
+
+Livable Square Footage, the price of the home has a positive correlation with the livable square footage of the home, i.e., as the livable square footage of the home increases, the price of the home also increases.
+
+And finally, the floor, the price of the house has a positive correlation with the number of floors in the house, i.e., as the number of floors in the house increases, the price of the house also increases.
